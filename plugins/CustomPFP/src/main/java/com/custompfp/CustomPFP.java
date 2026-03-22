@@ -10,15 +10,24 @@ import com.discord.api.commands.ApplicationCommandType;
 import com.discord.utilities.icon.IconUtils;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @AliucordPlugin
 @SuppressWarnings({"unchecked", "unused"})
 public class CustomPFP extends Plugin {
+    private static final String SETTINGS_PREFIX = "pfp_";
+    private static final Pattern USER_ID_PATTERN = Pattern.compile("\\d{5,}");
+    private static final Pattern GIF_EXTENSION_PATTERN = Pattern.compile("(?i)\\.gif(?=($|[?#]))");
+    private static final Pattern GIF_FORMAT_PATTERN = Pattern.compile("(?i)([?&]format=)gif(?=(&|#|$))");
+
+    private final Map<Long, AvatarOverride> overrides = new HashMap<>();
 
     @Override
     @SuppressWarnings("ConstantConditions")
     public void start(Context context) {
-        // Patch IconUtils.getForUser - run AFTER original (like UserPFP), then replace result
         try {
             patcher.patch(
                 IconUtils.class.getDeclaredMethod(
@@ -30,13 +39,11 @@ public class CustomPFP extends Plugin {
                     Integer.class
                 ),
                 new Hook(callFrame -> {
-                    // This runs after the original - result is already set to default avatar URL
                     long userId = ((Number) callFrame.args[0]).longValue();
-                    String customUrl = settings.getString("pfp_" + userId, null);
-                    if (customUrl != null && !customUrl.isEmpty()) {
+                    AvatarOverride override = getAvatarOverride(userId);
+                    if (override != null) {
                         boolean useAnimated = (Boolean) callFrame.args[3];
-                        String url = useAnimated ? customUrl : getStaticUrl(customUrl);
-                        callFrame.setResult(url);
+                        callFrame.setResult(useAnimated ? override.animatedUrl : override.staticUrl);
                     }
                 })
             );
@@ -101,30 +108,30 @@ public class CustomPFP extends Plugin {
             ctx -> {
                 if (ctx.containsArg("set")) {
                     var setargs = ctx.getSubCommandArgs("set");
-                    var user = (String) setargs.get("user");
-                    var url = (String) setargs.get("url");
-                    if (user == null || user.equals("") || url == null || url.equals("")) {
+                    String userId = extractUserId(setargs.get("user"));
+                    String url = normalizeUrl(setargs.get("url"));
+                    if (userId == null || url == null) {
                         return new CommandsAPI.CommandResult(
                             "Missing arguments. Usage: /pfp set @user <url>",
                             null,
                             false
                         );
                     }
-                    settings.setString("pfp_" + user, url.trim());
+                    setAvatarOverride(Long.parseLong(userId), url);
                     return new CommandsAPI.CommandResult("Custom profile picture set. You may need to navigate away and back to see the change.", null, false);
                 }
 
                 if (ctx.containsArg("clear")) {
                     var clearargs = ctx.getSubCommandArgs("clear");
-                    var user = (String) clearargs.get("user");
-                    if (user == null || user.equals("")) {
+                    String userId = extractUserId(clearargs.get("user"));
+                    if (userId == null) {
                         return new CommandsAPI.CommandResult(
                             "Missing user. Usage: /pfp clear @user",
                             null,
                             false
                         );
                     }
-                    settings.setString("pfp_" + user, null);
+                    clearAvatarOverride(Long.parseLong(userId));
                     return new CommandsAPI.CommandResult("Custom profile picture cleared.", null, false);
                 }
 
@@ -137,9 +144,109 @@ public class CustomPFP extends Plugin {
     public void stop(Context context) {
         patcher.unpatchAll();
         commands.unregisterAll();
+        overrides.clear();
+    }
+
+    private AvatarOverride getAvatarOverride(long userId) {
+        AvatarOverride cached = overrides.get(userId);
+        if (cached != null) {
+            return cached;
+        }
+
+        AvatarOverride override = AvatarOverride.fromUrl(settings.getString(getSettingsKey(userId), null));
+        if (override != null) {
+            overrides.put(userId, override);
+        }
+        return override;
+    }
+
+    private void setAvatarOverride(long userId, String animatedUrl) {
+        AvatarOverride override = AvatarOverride.fromUrl(animatedUrl);
+        if (override == null) {
+            clearAvatarOverride(userId);
+            return;
+        }
+
+        overrides.put(userId, override);
+        settings.setString(getSettingsKey(userId), override.animatedUrl);
+    }
+
+    private void clearAvatarOverride(long userId) {
+        overrides.remove(userId);
+        settings.setString(getSettingsKey(userId), null);
+    }
+
+    private static String getSettingsKey(long userId) {
+        return SETTINGS_PREFIX + userId;
+    }
+
+    private static String extractUserId(Object userArg) {
+        if (userArg == null) {
+            return null;
+        }
+
+        if (userArg instanceof Number) {
+            return String.valueOf(((Number) userArg).longValue());
+        }
+
+        String rawValue = userArg.toString().trim();
+        if (rawValue.isEmpty()) {
+            return null;
+        }
+
+        Matcher matcher = USER_ID_PATTERN.matcher(rawValue);
+        if (matcher.find()) {
+            return matcher.group();
+        }
+
+        try {
+            Object id = userArg.getClass().getMethod("getId").invoke(userArg);
+            if (id instanceof Number) {
+                return String.valueOf(((Number) id).longValue());
+            }
+            if (id != null) {
+                return extractUserId(id);
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+
+        return null;
+    }
+
+    private static String normalizeUrl(Object urlArg) {
+        if (urlArg == null) {
+            return null;
+        }
+
+        String url = urlArg.toString().trim();
+        return url.isEmpty() ? null : url;
     }
 
     private static String getStaticUrl(String url) {
-        return (url != null && url.contains(".gif")) ? url.replace(".gif", ".png") : url;
+        if (url == null || url.isEmpty()) {
+            return url;
+        }
+
+        String staticUrl = GIF_EXTENSION_PATTERN.matcher(url).replaceFirst(".png");
+        return GIF_FORMAT_PATTERN.matcher(staticUrl).replaceFirst("$1png");
+    }
+
+    private static final class AvatarOverride {
+        private final String animatedUrl;
+        private final String staticUrl;
+
+        private AvatarOverride(String animatedUrl, String staticUrl) {
+            this.animatedUrl = animatedUrl;
+            this.staticUrl = staticUrl;
+        }
+
+        private static AvatarOverride fromUrl(String animatedUrl) {
+            String normalizedUrl = normalizeUrl(animatedUrl);
+            if (normalizedUrl == null) {
+                return null;
+            }
+
+            return new AvatarOverride(normalizedUrl, getStaticUrl(normalizedUrl));
+        }
     }
 }
