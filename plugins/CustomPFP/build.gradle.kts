@@ -1,6 +1,10 @@
 version = "1.0.0"
 description = "Set custom profile pictures for any user"
 
+android {
+    namespace = "com.custompfp"
+}
+
 aliucord {
     changelog.set(
         """

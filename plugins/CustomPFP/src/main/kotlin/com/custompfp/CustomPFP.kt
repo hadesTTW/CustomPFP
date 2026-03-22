@@ -91,7 +91,7 @@ class CustomPFP : Plugin() {
             { ctx ->
                 when {
                     ctx.containsArg("set") -> {
-                        val args = ctx.getSubCommandArgs("set")
+                        val args = ctx.getSubCommandArgs("set") ?: emptyMap()
                         val user = args["user"] as? String
                         val url = args["url"] as? String
                         if (user.isNullOrBlank() || url.isNullOrBlank()) {
@@ -102,7 +102,7 @@ class CustomPFP : Plugin() {
                         }
                     }
                     ctx.containsArg("clear") -> {
-                        val args = ctx.getSubCommandArgs("clear")
+                        val args = ctx.getSubCommandArgs("clear") ?: emptyMap()
                         val user = args["user"] as? String
                         if (user.isNullOrBlank()) {
                             CommandsAPI.CommandResult("Missing user. Usage: /pfp clear @user", null, false)
