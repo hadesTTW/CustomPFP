@@ -34,7 +34,7 @@ class CustomPFP : Plugin() {
             }
         )
 
-        // Register /pfp command with set and clear subcommands
+        // Register /pfp command - url optional: with url = set, without = clear
         val userOption = Utils.createCommandOption(
             ApplicationCommandType.USER,
             "user",
@@ -50,68 +50,31 @@ class CustomPFP : Plugin() {
         val urlOption = Utils.createCommandOption(
             ApplicationCommandType.STRING,
             "url",
-            "Image URL (e.g. https://example.com/avatar.png)",
+            "Image URL (png, jpg, jpeg, gif, webp). Omit to clear.",
             null,
-            true,
-            true,
-            ArrayList(),
-            ArrayList(),
-            ArrayList(),
-            false
-        )
-        val setOption = Utils.createCommandOption(
-            ApplicationCommandType.SUBCOMMAND,
-            "set",
-            "Set a custom profile picture for a user",
-            null,
-            true,
+            false,
             true,
             ArrayList(),
             ArrayList(),
-            Arrays.asList(userOption, urlOption),
-            false
-        )
-        val clearOption = Utils.createCommandOption(
-            ApplicationCommandType.SUBCOMMAND,
-            "clear",
-            "Clear custom profile picture for a user",
-            null,
-            true,
-            true,
             ArrayList(),
-            ArrayList(),
-            Arrays.asList(userOption),
             false
         )
 
         commands.registerCommand(
             "pfp",
             "Set or clear custom profile pictures for users",
-            Arrays.asList(setOption, clearOption),
+            Arrays.asList(userOption, urlOption),
             { ctx ->
-                when {
-                    ctx.containsArg("set") -> {
-                        val args = ctx.getSubCommandArgs("set") ?: emptyMap()
-                        val user = args["user"] as? String
-                        val url = args["url"] as? String
-                        if (user.isNullOrBlank() || url.isNullOrBlank()) {
-                            CommandsAPI.CommandResult("Missing arguments. Usage: /pfp set @user <url>", null, false)
-                        } else {
-                            settings.setString("pfp_$user", url.trim())
-                            CommandsAPI.CommandResult("Custom profile picture set for user.", null, false)
-                        }
-                    }
-                    ctx.containsArg("clear") -> {
-                        val args = ctx.getSubCommandArgs("clear") ?: emptyMap()
-                        val user = args["user"] as? String
-                        if (user.isNullOrBlank()) {
-                            CommandsAPI.CommandResult("Missing user. Usage: /pfp clear @user", null, false)
-                        } else {
-                            settings.setString("pfp_$user", null)
-                            CommandsAPI.CommandResult("Custom profile picture cleared.", null, false)
-                        }
-                    }
-                    else -> CommandsAPI.CommandResult("Use /pfp set or /pfp clear", null, false)
+                val user = ctx.getRequiredUser("user")
+                val urlRaw = ctx.getString("url")
+                val url = urlRaw?.trim()?.takeIf { it.isNotBlank() }
+
+                if (url != null) {
+                    settings.setString("pfp_${user.id}", url)
+                    CommandsAPI.CommandResult("Custom profile picture set.", null, false)
+                } else {
+                    settings.setString("pfp_${user.id}", null)
+                    CommandsAPI.CommandResult("Custom profile picture cleared.", null, false)
                 }
             }
         )
@@ -123,6 +86,10 @@ class CustomPFP : Plugin() {
     }
 
     private fun getStaticUrl(url: String): String {
-        return if (url.contains(".gif")) url.replace(".gif", ".png") else url
+        // For animated gifs, use static fallback in non-animated contexts
+        return when {
+            url.contains(".gif") -> url.replace(".gif", ".png")
+            else -> url // png, jpg, jpeg, webp - use as-is
+        }
     }
 }
