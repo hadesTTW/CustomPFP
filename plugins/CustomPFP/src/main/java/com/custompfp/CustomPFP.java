@@ -18,7 +18,7 @@ public class CustomPFP extends Plugin {
     @Override
     @SuppressWarnings("ConstantConditions")
     public void start(Context context) {
-        // Patch IconUtils.getForUser to return custom PFP URLs when set
+        // Patch IconUtils.getForUser - run AFTER original (like UserPFP), then replace result
         try {
             patcher.patch(
                 IconUtils.class.getDeclaredMethod(
@@ -30,12 +30,14 @@ public class CustomPFP extends Plugin {
                     Integer.class
                 ),
                 new Hook(callFrame -> {
-                    long userId = (Long) callFrame.args[0];
+                    // This runs after the original - result is already set to default avatar URL
+                    long userId = ((Number) callFrame.args[0]).longValue();
                     String customUrl = settings.getString("pfp_" + userId, null);
-                    if (customUrl == null) return;
-                    boolean useAnimated = (Boolean) callFrame.args[3];
-                    String url = useAnimated ? customUrl : getStaticUrl(customUrl);
-                    callFrame.setResult(url);
+                    if (customUrl != null && !customUrl.isEmpty()) {
+                        boolean useAnimated = (Boolean) callFrame.args[3];
+                        String url = useAnimated ? customUrl : getStaticUrl(customUrl);
+                        callFrame.setResult(url);
+                    }
                 })
             );
         } catch (NoSuchMethodException e) {
@@ -108,8 +110,8 @@ public class CustomPFP extends Plugin {
                             false
                         );
                     }
-                    settings.setString(user, url.trim());
-                    return new CommandsAPI.CommandResult("Custom profile picture set.", null, false);
+                    settings.setString("pfp_" + user, url.trim());
+                    return new CommandsAPI.CommandResult("Custom profile picture set. You may need to navigate away and back to see the change.", null, false);
                 }
 
                 if (ctx.containsArg("clear")) {
@@ -122,7 +124,7 @@ public class CustomPFP extends Plugin {
                             false
                         );
                     }
-                    settings.setString(user, null);
+                    settings.setString("pfp_" + user, null);
                     return new CommandsAPI.CommandResult("Custom profile picture cleared.", null, false);
                 }
 
