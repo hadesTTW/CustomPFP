@@ -1,4 +1,4 @@
-package com.github.yournamehere;
+package com.github.hadesTTW;
 
 import android.content.Context;
 
